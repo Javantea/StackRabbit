@@ -25,7 +25,8 @@ enum RequestType {
   GET_TOP_MOVES, // Gets a list of the top moves, using full playouts. Supports with or without next box.
   GET_TOP_MOVES_HYBRID, // Gets a list of the top moves *BOTH* with and without next box.
   RATE_MOVE, // Compares a player move to the best move, and gives the score for both, with and without next box.
-  GET_MOVE // Gets a single best move for a given scenario, using full playouts. Supports with or without next box.
+  GET_MOVE, // Gets a single best move for a given scenario, using full playouts. Supports with or without next box.
+  EXPLAIN_TOP_MOVES
 };
 
 struct Piece {
@@ -127,6 +128,25 @@ struct FastEvalWeights {
   float unableToBurnCoef;
 };
 
+struct FastEvalExplain {
+  float surfaceFactor;
+  float surfaceLeftFactor;
+  float avgHeightFactor;
+  float lineClearFactor;
+  float holeFactor;
+  float holeWeightFactor;
+  float guaranteedBurnsFactor;
+  float likelyBurnsFactor;
+  float inaccessibleLeftFactor;
+  float inaccessibleRightFactor;
+  float coveredWellFactor;
+  float highCol9Factor;
+  float tetrisReadyFactor;
+  float builtOutLeftFactor;
+  float unableToBurnFactor;
+  float total;
+};
+
 /**
  * Precomputed meta-information related to tapping speed and piece reachability.
  * Considered "global" because the tapping speed does not change within the lifetime of one query to the C++ module
@@ -163,6 +183,14 @@ struct Possibility {
   GameState resultingState;
   float evalScoreInclReward;
   float immediateReward;
+  bool operator<(const Possibility& other) const {
+    // TODO: test
+      return evalScoreInclReward > other.evalScoreInclReward; // higher score is better
+  }
+};
+
+struct PossibilityExplain : Possibility {
+  FastEvalExplain explain;
 };
 
 /** A data model for one playout within a series of such playouts*/
@@ -187,6 +215,15 @@ struct EngineMoveData {
   PlayoutData playout5; // 33 %ile
   PlayoutData playout6; // 16 %ile
   PlayoutData playout7; // Worst case
+
+  bool operator<(const EngineMoveData& other) const {
+    // TODO: test
+      return evalScore > other.evalScore; // higher score is better
+  }
+};
+
+struct EngineMoveDataExplain : EngineMoveData {
+  FastEvalExplain explain;
 };
 
 #endif

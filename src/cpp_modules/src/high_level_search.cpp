@@ -54,6 +54,11 @@ void partiallySortPossibilityList(list<Possibility> &possibilityList, int keepTo
 
 }
 
+void partiallySortPossibilityList(list<PossibilityExplain> &possibilityList, int keepTopN, OUT list<PossibilityExplain> &sortedList){
+  possibilityList.sort();
+  sortedList.assign(possibilityList.begin(), std::next(possibilityList.begin(), std::min(keepTopN, static_cast<int>(possibilityList.size()))));
+}
+
 /** Searches 1-ply from a starting state, and performs an eval on each resulting state.
  * @returns an UNSORTED list of evaluated possibilities
  */
@@ -76,6 +81,38 @@ int searchDepth1(GameState gameState, const Piece *firstPiece, int keepTopN, con
       resultingState,
       evalScoreInclReward,
       reward
+    };
+    possibilityList.push_back(newPossibility);
+  }
+  return (int) possibilityList.size();
+}
+
+/** Searches 1-ply from a starting state, and performs an eval on each resulting state.
+ * @returns an UNSORTED list of evaluated possibilities
+ */
+int searchDepth1Ex(GameState gameState, const Piece *firstPiece, int keepTopN, const EvalContext *evalContext, OUT list<PossibilityExplain> &possibilityList){
+  vector<LockPlacement> firstLockPlacements;
+  moveSearch(gameState, firstPiece, evalContext->pieceRangeContext.inputFrameTimeline, firstLockPlacements);
+  for (auto it = begin(firstLockPlacements); it != end(firstLockPlacements); ++it) {
+    LockPlacement firstPlacement = *it;
+
+    GameState resultingState = advanceGameState(gameState, firstPlacement, evalContext);
+    if (SHOULD_PLAY_PERFECT && ((resultingState.lines - gameState.lines) % 4) != 0) {
+      continue; // While playing perfect, ignore any placements that burn lines
+    }
+    float reward = getLineClearFactor(resultingState.lines - gameState.lines, evalContext->weights, evalContext->shouldRewardLineClears);
+    FastEvalExplain explainEval = fastEvalEx(gameState, resultingState, firstPlacement, evalContext);
+
+    PossibilityExplain newPossibility = {
+      // firstPlacement
+      // g++ requires no curly braces. I don't make the rules. Just add them back when this changes.
+      firstPlacement.x, firstPlacement.y, firstPlacement.rotationIndex,
+      // secondPlacement
+      NONE, NONE, NONE,
+      resultingState,
+      explainEval.total,
+      reward,
+      explainEval
     };
     possibilityList.push_back(newPossibility);
   }
@@ -126,6 +163,63 @@ int searchDepth2(GameState gameState, const Piece *firstPiece, const Piece *seco
         resultingState,
         evalScore,
         firstMoveReward + secondMoveReward
+      };
+
+      possibilityList.push_back(newPossibility);
+    }
+  }
+  return (int) possibilityList.size();
+}
+
+/** Searches 2-ply from a starting state, and performs a fast eval on each of the resulting states.
+ * @returns an UNSORTED list of evaluated possibilities
+ */
+int searchDepth2Ex(GameState gameState, const Piece *firstPiece, const Piece *secondPiece, int keepTopN, const EvalContext *evalContext, OUT list<PossibilityExplain> &possibilityList){
+
+  // Get the placements of the first piece
+  vector<LockPlacement> firstLockPlacements;
+  moveSearch(gameState, firstPiece, evalContext->pieceRangeContext.inputFrameTimeline, firstLockPlacements);
+  for (auto it = begin(firstLockPlacements); it != end(firstLockPlacements); ++it) {
+    LockPlacement firstPlacement = *it;
+    maybePrint("\n\n\n\nNEW FIRST MOVE: rot=%d x=%d\n", firstPlacement.rotationIndex, firstPlacement.x);
+
+    GameState afterFirstMove = advanceGameState(gameState, firstPlacement, evalContext);
+    if (SHOULD_PLAY_PERFECT && ((afterFirstMove.lines - gameState.lines) % 4) != 0) {
+      continue; // While playing perfect, ignore any placements that burn lines
+    }
+    for (int i = 0; i < 19; i++) {
+      maybePrint("%d ", (afterFirstMove.board[i] & ALL_TUCK_SETUP_BITS) >> 20);
+    }
+    maybePrint("%d end of post first move\n", (afterFirstMove.board[19] & ALL_TUCK_SETUP_BITS) >> 20);
+    if (LOGGING_ENABLED) {
+      printBoard(afterFirstMove.board);
+    }
+
+    float firstMoveReward = getLineClearFactor(afterFirstMove.lines - gameState.lines, evalContext->weights, evalContext->shouldRewardLineClears);
+
+    // Get the placements of the second piece
+    vector<LockPlacement> secondLockPlacements;
+    moveSearch(afterFirstMove, secondPiece, evalContext->pieceRangeContext.inputFrameTimeline, secondLockPlacements);
+
+    for (auto secondPlacement : secondLockPlacements) {
+      GameState resultingState = advanceGameState(afterFirstMove, secondPlacement, evalContext);
+      if (SHOULD_PLAY_PERFECT && ((resultingState.lines - afterFirstMove.lines) % 4) != 0) {
+        continue; // While playing perfect, ignore any placements that burn lines
+      }
+      FastEvalExplain explainEval = fastEvalEx(afterFirstMove, resultingState, secondPlacement, evalContext);
+      float evalScore = firstMoveReward + explainEval.total;
+      float secondMoveReward = getLineClearFactor(resultingState.lines - afterFirstMove.lines, evalContext->weights, evalContext->shouldRewardLineClears);
+
+      PossibilityExplain newPossibility = {
+        // firstPlacement
+        // g++ requires no curly braces. I don't make the rules. Just add them back when this changes.
+        firstPlacement.x, firstPlacement.y, firstPlacement.rotationIndex ,
+        // secondPlacement
+        secondPlacement.x, secondPlacement.y, secondPlacement.rotationIndex,
+        resultingState,
+        evalScore,
+        firstMoveReward + secondMoveReward,
+        explainEval
       };
 
       possibilityList.push_back(newPossibility);
@@ -381,6 +475,76 @@ std::string getTopMoveList(GameState gameState, const Piece *firstPiece, const P
   return formatEngineMoveList(sortedList, firstPiece, secondPiece);
 }
 
+
+/**
+ * Gets a list of the top moves, formatted as a JSON string. (See formatting.hpp for exact format details).
+ */
+std::string explainTopMoveList(GameState gameState, const Piece *firstPiece, const Piece *secondPiece, int keepTopN, int playoutCount, int playoutLength, const EvalContext *evalContext, const PieceRangeContext pieceRangeContextLookup[3]){
+  // Keep a running list of the top X possibilities as the move search is happening.
+  // Keep twice as many as we'll eventually need, since some duplicates may be removed before playouts start
+  int numSorted = keepTopN * 2;
+  printf("SecondPiece %p %d\n", secondPiece, secondPiece == NULL);
+
+  // Get the list of evaluated possibilities
+  list<PossibilityExplain> possibilityList;
+  list<PossibilityExplain> initiallySortedList;
+  list<EngineMoveDataExplain> sortedList;
+
+  // Search depth either 1 or 2 depending on whether a next piece was provided
+  const Piece *lastSeenPiece;
+  if (secondPiece == NULL){
+    searchDepth1Ex(gameState, firstPiece, numSorted, evalContext, possibilityList);
+    lastSeenPiece = firstPiece;
+  } else {
+    searchDepth2Ex(gameState, firstPiece, secondPiece, numSorted, evalContext, possibilityList);
+    lastSeenPiece = secondPiece;
+  }
+
+  if (possibilityList.size() == 0){
+    return "No legal moves";
+  }
+  partiallySortPossibilityList(possibilityList, numSorted, initiallySortedList);
+
+  // Perform playouts on the promising possibilities
+  int numAdded = 0;
+  for (PossibilityExplain const& possibility : initiallySortedList) {
+    if (numAdded >= keepTopN){
+      break;
+    }
+    // printf("Doing playout for: %s %s\n", encodeLockPosition(possibility.firstPlacement).c_str(), encodeLockPosition(possibility.secondPlacement).c_str());
+    string lockPosEncoded = encodeLockPosition(possibility.firstPlacement);
+    vector<PlayoutData> playoutDataList = {};
+    float overallScore = possibility.immediateReward
+          + getPlayoutScore(possibility.resultingState, playoutCount, playoutLength, pieceRangeContextLookup, lastSeenPiece->index, &playoutDataList);
+
+    // If this position has no legal playouts, ignore it
+    if (playoutDataList.size() == 0){
+      continue;
+    }
+    // Pick 7 playouts from the sorted playout list
+    int len = (int) playoutDataList.size();
+    EngineMoveDataExplain newMoveData = {
+      possibility.firstPlacement,
+      possibility.secondPlacement,
+      /* playoutScore */ overallScore,
+      /* shallowEvalScore */ possibility.evalScoreInclReward,
+      /* resultingBoard */ formatBoard(possibility.resultingState.board),
+      /* playout1 (best case) */ playoutDataList.at(0),
+      /* playout2 (83 %ile case) */ playoutDataList.at(len / 6), // Fractions are "backwards" because moves are ordered best (100%ile) to worst (0%ile).
+      /* playout3 (66 %ile case) */ playoutDataList.at(len / 3),
+      /* playout4 (median case) */ playoutDataList.at(len / 2),
+      /* playout5 (33 %ile case) */ playoutDataList.at(len * 2 / 3),
+      /* playout6 (16 %ile case) */ playoutDataList.at(len * 5 / 6),
+      /* playout7 (worst case) */ playoutDataList.at(len - 1),
+      /* explain */ possibility.explain
+    };
+    sortedList.push_back(newMoveData);
+    numAdded++;
+  }
+  sortedList.sort();
+
+  return formatEngineMoveListExplain(sortedList, firstPiece, secondPiece);
+}
 
 
 /** Calculates the valuation of every possible terminal position for a given piece on a given board, and stores it in a map.

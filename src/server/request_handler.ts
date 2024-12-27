@@ -94,6 +94,9 @@ export class RequestHandler {
       case "engine-movelist-cpp":
         return [this.handleCppLookupTopMoves(searchState, urlArgs), 200];
 
+      case "engine-movelist-cpp-explain":
+        return [this.handleCppLookupTopMovesExplain(searchState, urlArgs), 200];
+
       case "engine-movelist-cpp-hybrid":
         return [this.handleCppLookupTopMovesHybrid(searchState, urlArgs), 200];
 
@@ -248,6 +251,11 @@ export class RequestHandler {
   handleCppLookupTopMoves(searchState: SearchState, urlArgs: UrlArguments) {
     const encodedInputString = getCppEncodedInputString(searchState, urlArgs);
     return cModule.getTopMoves(encodedInputString);
+  }
+
+  handleCppLookupTopMovesExplain(searchState: SearchState, urlArgs: UrlArguments) {
+    const encodedInputString = getCppEncodedInputString(searchState, urlArgs);
+    return cModule.explainTopMoves(encodedInputString);
   }
 
   handleCppLookupTopMovesHybrid(

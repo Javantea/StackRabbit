@@ -2,8 +2,11 @@
 #define FORMATTING
 
 #include <string>
+#include <sstream>
 #include "types.hpp"
 using namespace std;
+
+std::string formatExplain(const FastEvalExplain &explain);
 
 const std::string BOARD_ENCODING = "abcdefghijklmnopqrstuvwxyzABCDEF"; // Encodes 5 bits of information (32 chars)
 
@@ -177,6 +180,88 @@ std::string formatEngineMoveList(list<EngineMoveData> moveList, const Piece *fir
   }
   output.append("]");
   return output;
+}
+
+/**
+ * Formats a list of engine moves (with explain), for use in the "engine-movelist-cpp" API request.
+ * The format is JSON-like, as follows:
+ * "[
+ *   {
+ *     firstPlacement: [0, -4, 18],
+ *     secondPlacement: [1, 4, 20],
+ *     playoutScore: 31.587,
+ *     shallowEvalScore: 28.44,
+ *   },
+ *   { ... },
+ *   { ... },
+ * ]"
+*/
+std::string formatEngineMoveListExplain(list<EngineMoveDataExplain> moveList, const Piece *firstPiece, const Piece *secondPiece){
+  std::string output = std::string("[");
+  for( const auto& move : moveList ) {
+    output += "{\"firstPlacement\":";
+    output += formatLockPosition(move.firstPlacement, firstPiece->initialY);
+    if (move.secondPlacement.x != NULL_LOCK_LOCATION.x){
+      output += ", \"secondPlacement\":";
+      output += formatLockPosition(move.secondPlacement, secondPiece->initialY);
+    }
+    char formattedMoveBuffer[70]; // Max length I got in my testing was 108 with for just the scores
+    snprintf(formattedMoveBuffer,
+        70,
+        ", \"playoutScore\":%.2f, \"shallowEvalScore\":%.2f",
+        move.playoutScore,
+        move.evalScore
+        );
+    output.append(formattedMoveBuffer);
+
+    output += ", \"resultingBoard\":\"";
+    output += move.resultingBoard;
+    output += "\"";
+
+    output += ", \"playout1\":";
+    output += formatPlayout(move.playout1);
+    output += ", \"playout2\":";
+    output += formatPlayout(move.playout2);
+    output += ", \"playout3\":";
+    output += formatPlayout(move.playout3);
+    output += ", \"playout4\":";
+    output += formatPlayout(move.playout4);
+    output += ", \"playout5\":";
+    output += formatPlayout(move.playout5);
+    output += ", \"playout6\":";
+    output += formatPlayout(move.playout6);
+    output += ", \"playout7\":";
+    output += formatPlayout(move.playout7);
+    output += ", \"explain\":";
+    output += formatExplain(move.explain);
+
+    output.append(" },");
+  }
+  if (moveList.size() > 0) {
+    output.pop_back(); // Remove the last comma
+  }
+  output.append("]");
+  return output;
+}
+
+std::string formatExplain(const FastEvalExplain &explain){
+  std::ostringstream output;
+  output << "{\"surface\":"  << explain.surfaceFactor << ", " <<
+  "\"surfaceLeft\":"  << explain.surfaceLeftFactor << ", " <<
+  "\"avgHeight\":"  << explain.avgHeightFactor << ", " <<
+  "\"lineClear\":"  << explain.lineClearFactor << ", " <<
+  "\"hole\":"  << explain.holeFactor << ", " <<
+  "\"holeWeight\":"  << explain.holeWeightFactor << ", " <<
+  "\"guaranteedBurns\":"  << explain.guaranteedBurnsFactor << ", " <<
+  "\"likelyBurns\":"  << explain.likelyBurnsFactor << ", " <<
+  "\"inaccessibleLeft\":"  << explain.inaccessibleLeftFactor << ", " <<
+  "\"inaccessibleRight\":"  << explain.inaccessibleRightFactor << ", " <<
+  "\"coveredWell\":"  << explain.coveredWellFactor << ", " <<
+  "\"highCol9\":"  << explain.highCol9Factor << ", " <<
+  "\"tetrisReady\":"  << explain.tetrisReadyFactor << ", " <<
+  "\"builtOutLeft\":"  << explain.builtOutLeftFactor << ", " <<
+  "\"unableToBurn\":"  << explain.unableToBurnFactor << "}";
+  return output.str();
 }
 
 std::string formatRateMove(float playerNoAdj, float bestNoAdj, float playerWithAdj, float bestWithAdj, bool hasNb){

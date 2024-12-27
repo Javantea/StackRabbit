@@ -424,7 +424,6 @@ float evalForPerfectPlay(GameState gameState,
 }
 
 
-
 float fastEval(GameState gameState,
                GameState newState,
                LockPlacement lockPlacement,
@@ -513,4 +512,91 @@ float fastEval(GameState gameState,
   }
 
   return total;
+}
+
+FastEvalExplain fastEvalEx(GameState gameState,
+               GameState newState,
+               LockPlacement lockPlacement,
+               const EvalContext *evalContext) {
+  FastEvalWeights weights = evalContext->weights;
+  FastEvalExplain factors;
+  // Preliminary helper work
+  float avgHeight = getAverageHeight(newState.surfaceArray, evalContext->wellColumn);
+  int isKillscreenLineout = gameState.level >= 29 && evalContext->aiMode == LINEOUT;
+  // Calculate all the factors
+  factors.avgHeightFactor = weights.avgHeightCoef * getAverageHeightFactor(avgHeight, evalContext->scareHeight);
+  factors.builtOutLeftFactor = weights.builtOutLeftCoef * getBuiltOutLeftFactor(newState.surfaceArray, newState.board, avgHeight, evalContext->scareHeight);
+  factors.coveredWellFactor = weights.coveredWellCoef * getCoveredWellFactor(newState.board, evalContext->wellColumn, evalContext->scareHeight);
+  factors.guaranteedBurnsFactor = weights.burnCoef * getGuaranteedBurnsFactor(newState.board, evalContext->wellColumn);
+  factors.likelyBurnsFactor = weights.burnCoef * getLikelyBurnsFactor(newState.surfaceArray, evalContext->wellColumn, evalContext->maxSafeCol9);
+  factors.highCol9Factor = weights.col9Coef * getCol9Factor(newState.surfaceArray[8], evalContext->maxSafeCol9);
+  factors.holeFactor = weights.holeCoef * (newState.numTrueHoles + newState.numPartialHoles);
+  factors.holeWeightFactor = abs(weights.holeWeightCoef) > FLOAT_EPSILON ? weights.holeWeightCoef * getHoleWeightFactor(newState.board, evalContext->wellColumn) : 0;
+  factors.inaccessibleLeftFactor = isKillscreenLineout
+              ? 0
+              : (weights.inaccessibleLeftCoef * getInaccessibleLeftFactor(newState.board, newState.surfaceArray, evalContext->pieceRangeContext.maxAccessibleLeft5Surface, evalContext->wellColumn));
+  factors.inaccessibleRightFactor = isKillscreenLineout
+              ? 0
+              : (weights.inaccessibleRightCoef * getInaccessibleRightFactor(newState.surfaceArray, evalContext->pieceRangeContext.maxAccessibleRightSurface));
+  factors.lineClearFactor = getLineClearFactor(newState.lines - gameState.lines, weights, evalContext->shouldRewardLineClears);
+  factors.surfaceFactor = weights.surfaceCoef * rateSurface(newState.surfaceArray, evalContext);
+  factors.surfaceLeftFactor =
+    (isKillscreenLineout)
+      ? weights.surfaceLeftCoef * getLeftSurfaceFactor(newState.board, newState.surfaceArray, evalContext->pieceRangeContext.max5TapHeight)
+      : 0;
+  factors.tetrisReadyFactor =
+    (evalContext->wellColumn >= 0 && isTetrisReady(newState.board, newState.surfaceArray, evalContext->wellColumn))
+      ? weights.tetrisReadyCoef
+      : 0;
+  factors.unableToBurnFactor = weights.unableToBurnCoef * getUnableToBurnFactor(newState.board, newState.surfaceArray, evalContext->scareHeight);
+
+  factors.total = factors.surfaceFactor + factors.surfaceLeftFactor + factors.avgHeightFactor + factors.lineClearFactor + factors.holeFactor + factors.holeWeightFactor + factors.guaranteedBurnsFactor + factors.likelyBurnsFactor + factors.inaccessibleLeftFactor + factors.inaccessibleRightFactor + factors.coveredWellFactor + factors.highCol9Factor + factors.tetrisReadyFactor + factors.builtOutLeftFactor + factors.unableToBurnFactor;
+  factors.total = max(weights.deathCoef, factors.total); // Can't be worse than death
+
+  // Logging
+  if (LOGGING_ENABLED) {
+    maybePrint("\nEvaluating possibility %d %d %d\n",
+               lockPlacement.rotationIndex,
+               lockPlacement.x - SPAWN_X,
+               lockPlacement.y);
+    printBoard(newState.board);
+    printSurface(newState.surfaceArray);
+    maybePrint("Tuck setups:\n");
+    for (int i = 0; i < 19; i++) {
+      maybePrint("%d ", (newState.board[i] & ALL_TUCK_SETUP_BITS) >> 20);
+    }
+    maybePrint("%d\n", (newState.board[19] & ALL_TUCK_SETUP_BITS) >> 20);
+    maybePrint("Holes:\n");
+    for (int i = 0; i < 19; i++) {
+      maybePrint("%d ", (newState.board[i] & ALL_HOLE_BITS) >> 10);
+    }
+    maybePrint("%d\n", (newState.board[19] & ALL_HOLE_BITS) >> 10);
+    maybePrint("Hole weights:\n");
+    for (int i = 0; i < 19; i++) {
+      maybePrint("%d ", (newState.board[i] & HOLE_WEIGHT_BIT) > 0);
+    }
+    maybePrint("%d\n", (newState.board[19] & HOLE_WEIGHT_BIT) > 0);
+
+    printf("Numholes %d\n", newState.numTrueHoles);
+    maybePrint("AiMode %d\n", evalContext->aiMode);
+    maybePrint(
+      "Surface %01f, LeftSurface %01f, AvgHeight %01f, LineClear %01f, Hole %01f, HoleWeight %01f, GuaranteedBurns %01f, LikelyBurns %01f, InaccLeft %01f, CoveredWell %01f, HighCol9 %01f, TetrisReady %01f, BuiltLeft %01f, UnableToBrn %01f,\t Total: %01f\n",
+      factors.surfaceFactor,
+      factors.surfaceLeftFactor,
+      factors.avgHeightFactor,
+      factors.lineClearFactor,
+      factors.holeFactor,
+      factors.holeWeightFactor,
+      factors.guaranteedBurnsFactor,
+      factors.likelyBurnsFactor,
+      factors.inaccessibleLeftFactor,
+      factors.coveredWellFactor,
+      factors.highCol9Factor,
+      factors.tetrisReadyFactor,
+      factors.builtOutLeftFactor,
+      factors.unableToBurnFactor,
+      factors.total);
+  }
+
+  return factors;
 }

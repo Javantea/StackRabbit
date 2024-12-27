@@ -46,6 +46,20 @@ NAN_METHOD(GetTopMoves) {
   info.GetReturnValue().Set(Nan::New<String>(result.c_str()).ToLocalChecked());
 }
 
+NAN_METHOD(ExplainTopMoves) {
+  // Parse string arg
+  Nan::MaybeLocal<String> maybeStr = Nan::To<String>(info[0]);
+  v8::Local<String> inputStrNan;
+  if (maybeStr.ToLocal(&inputStrNan) == false) {
+    Nan::ThrowError("Error converting first argument to string");
+  }
+  char const * inputStr = *Nan::Utf8String(inputStrNan);
+
+  std::string result = mainProcess(inputStr, EXPLAIN_TOP_MOVES);
+
+  info.GetReturnValue().Set(Nan::New<String>(result.c_str()).ToLocalChecked());
+}
+
 NAN_METHOD(GetTopMovesHybrid) {
   // Parse string arg
   Nan::MaybeLocal<String> maybeStr = Nan::To<String>(info[0]);
@@ -85,6 +99,8 @@ NAN_MODULE_INIT(Init) {
            Nan::GetFunction(Nan::New<FunctionTemplate>(GetTopMovesHybrid)).ToLocalChecked());
   Nan::Set(target, Nan::New("rateMove").ToLocalChecked(),
            Nan::GetFunction(Nan::New<FunctionTemplate>(RateMove)).ToLocalChecked());
+  Nan::Set(target, Nan::New("explainTopMoves").ToLocalChecked(),
+           Nan::GetFunction(Nan::New<FunctionTemplate>(ExplainTopMoves)).ToLocalChecked());
 }
 
 NODE_MODULE(myaddon, Init)
